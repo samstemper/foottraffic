@@ -120,9 +120,9 @@ const FLOW_MAX_PARTICLES_PER_LOCATION = 40;
 const FLOW_MIN_SPAWN_INTERVAL_SECONDS = 0.08;
 const FLOW_MIN_CYCLE_DURATION_SECONDS = 0.8;
 const FLOW_MAX_CYCLE_DURATION_SECONDS = 30;
-const FLOW_EDGE_OPACITY = 0.04;
-const FLOW_PEAK_OPACITY = 0.72;
-const FLOW_STATIC_OPACITY = 0.42;
+const FLOW_EDGE_OPACITY = 0;
+const FLOW_PEAK_OPACITY = 0.88;
+const FLOW_STATIC_OPACITY = 0.58;
 const CHART_WIDTH = 960;
 const CHART_HEIGHT = 420;
 const CHART_PADDING = {
@@ -170,273 +170,6 @@ const MAP_OFFSET = {
   x: (MAP_WIDTH - (ROTATED_BOUNDS.maxX - ROTATED_BOUNDS.minX) * MAP_SCALE) / 2,
   y: (MAP_HEIGHT - (ROTATED_BOUNDS.maxY - ROTATED_BOUNDS.minY) * MAP_SCALE) / 2,
 };
-
-const STREETS: Street[] = [
-  {
-    name: "Quay Street",
-    kind: "waterfront",
-    points: [
-      [174.7595, -36.8437],
-      [174.771, -36.8437],
-    ],
-  },
-  {
-    name: "Customs Street",
-    kind: "primary",
-    points: [
-      [174.7594, -36.8451],
-      [174.7707, -36.8451],
-    ],
-  },
-  {
-    name: "Fanshawe Street",
-    kind: "secondary",
-    points: [
-      [174.7591, -36.8444],
-      [174.7645, -36.8444],
-    ],
-  },
-  {
-    name: "Beach Road",
-    kind: "secondary",
-    points: [
-      [174.7676, -36.8445],
-      [174.7711, -36.8445],
-    ],
-  },
-  {
-    name: "Swanson Street",
-    kind: "lane",
-    points: [
-      [174.761, -36.8458],
-      [174.7678, -36.8458],
-    ],
-  },
-  {
-    name: "Wyndham Street",
-    kind: "lane",
-    points: [
-      [174.7602, -36.8474],
-      [174.7672, -36.8474],
-    ],
-  },
-  {
-    name: "Durham Street",
-    kind: "lane",
-    points: [
-      [174.7628, -36.8484],
-      [174.767, -36.8484],
-    ],
-  },
-  {
-    name: "Vulcan Lane",
-    kind: "lane",
-    points: [
-      [174.7657, -36.8476],
-      [174.7674, -36.8476],
-    ],
-  },
-  {
-    name: "Shortland Street",
-    kind: "secondary",
-    points: [
-      [174.7622, -36.8467],
-      [174.7703, -36.8467],
-    ],
-  },
-  {
-    name: "Victoria Street",
-    kind: "primary",
-    points: [
-      [174.7591, -36.8492],
-      [174.769, -36.8492],
-    ],
-  },
-  {
-    name: "Wellesley Street",
-    kind: "primary",
-    points: [
-      [174.759, -36.8522],
-      [174.7684, -36.8522],
-    ],
-  },
-  {
-    name: "Mayoral Drive",
-    kind: "secondary",
-    points: [
-      [174.7589, -36.8539],
-      [174.7678, -36.8539],
-    ],
-  },
-  {
-    name: "Wakefield Street",
-    kind: "secondary",
-    points: [
-      [174.7612, -36.8549],
-      [174.7682, -36.8549],
-    ],
-  },
-  {
-    name: "Cook Street",
-    kind: "secondary",
-    points: [
-      [174.7589, -36.8559],
-      [174.7644, -36.8559],
-    ],
-  },
-  {
-    name: "Karangahape Road",
-    kind: "primary",
-    points: [
-      [174.7589, -36.8577],
-      [174.7668, -36.8577],
-    ],
-  },
-  {
-    name: "Queen Street",
-    kind: "primary",
-    points: [
-      [174.7658, -36.8435],
-      [174.7658, -36.8583],
-    ],
-  },
-  {
-    name: "High Street",
-    kind: "secondary",
-    points: [
-      [174.7668, -36.844],
-      [174.7668, -36.851],
-    ],
-  },
-  {
-    name: "Albert Street",
-    kind: "secondary",
-    points: [
-      [174.7621, -36.8435],
-      [174.7621, -36.8562],
-    ],
-  },
-  {
-    name: "Nelson Street",
-    kind: "secondary",
-    points: [
-      [174.7596, -36.8437],
-      [174.7596, -36.8569],
-    ],
-  },
-  {
-    name: "Federal Street",
-    kind: "secondary",
-    points: [
-      [174.763, -36.8442],
-      [174.763, -36.8507],
-    ],
-  },
-  {
-    name: "Elliott Street",
-    kind: "lane",
-    points: [
-      [174.7642, -36.8474],
-      [174.7642, -36.8525],
-    ],
-  },
-  {
-    name: "Lorne Street",
-    kind: "lane",
-    points: [
-      [174.7669, -36.8486],
-      [174.7669, -36.8545],
-    ],
-  },
-  {
-    name: "Kitchener Street",
-    kind: "lane",
-    points: [
-      [174.7678, -36.8472],
-      [174.7678, -36.8522],
-    ],
-  },
-  {
-    name: "Princes Street",
-    kind: "secondary",
-    points: [
-      [174.7689, -36.847],
-      [174.7689, -36.8542],
-    ],
-  },
-  {
-    name: "Commerce Street",
-    kind: "secondary",
-    points: [
-      [174.7681, -36.8437],
-      [174.7681, -36.8484],
-    ],
-  },
-  {
-    name: "Fort Street",
-    kind: "lane",
-    points: [
-      [174.7634, -36.8459],
-      [174.7693, -36.8459],
-    ],
-  },
-  {
-    name: "Darby Street",
-    kind: "lane",
-    points: [
-      [174.7631, -36.8498],
-      [174.7654, -36.8498],
-    ],
-  },
-  {
-    name: "Hobson Street",
-    kind: "secondary",
-    points: [
-      [174.7605, -36.8448],
-      [174.7605, -36.8568],
-    ],
-  },
-  {
-    name: "Sale Street",
-    kind: "lane",
-    points: [
-      [174.7612, -36.8438],
-      [174.7612, -36.8469],
-    ],
-  },
-  {
-    name: "Greys Avenue",
-    kind: "lane",
-    points: [
-      [174.7628, -36.8521],
-      [174.7628, -36.8576],
-    ],
-  },
-  {
-    name: "Pitt Street",
-    kind: "secondary",
-    points: [
-      [174.7609, -36.8543],
-      [174.7609, -36.8583],
-    ],
-  },
-  {
-    name: "Symonds Street",
-    kind: "secondary",
-    points: [
-      [174.7691, -36.8521],
-      [174.7691, -36.8582],
-    ],
-  },
-  {
-    name: "Anzac Avenue",
-    kind: "secondary",
-    points: [
-      [174.7696, -36.8446],
-      [174.7696, -36.855],
-    ],
-  },
-];
 
 function rotateMapPoint(x: number, y: number) {
   const centeredX = x - MAP_CENTER.x;
@@ -1298,16 +1031,7 @@ function App() {
     (row) => row.currentAverage !== null,
   ).length;
 
-  const fallbackRoads = useMemo<BasemapRoad[]>(
-    () =>
-      STREETS.map((street) => ({
-        ...street,
-        id: street.name,
-      })),
-    [],
-  );
-
-  const mapRoads = basemap?.roads.length ? basemap.roads : fallbackRoads;
+  const mapRoads = basemap?.roads ?? [];
   const mapBuildings = basemap?.buildings ?? [];
 
   const selectedLabel =
@@ -1478,9 +1202,6 @@ function App() {
                   </button>
                 );
               })}
-            </div>
-            <div className="north-indicator" aria-hidden="true">
-              <span>N</span>
             </div>
           </div>
         )}

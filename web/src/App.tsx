@@ -27,6 +27,14 @@ type TrendPoint = {
   movingAverage: number | null;
 };
 
+type WeeklyComparisonPoint = {
+  dayOfWeek: string;
+  hour: number;
+  label: string;
+  firstCount: number | null;
+  secondCount: number | null;
+};
+
 type SummaryTableRow = {
   locationId: string;
   locationName: string;
@@ -99,6 +107,7 @@ const DAYS_OF_WEEK = [
   "Saturday",
   "Sunday",
 ];
+const HOURS_OF_DAY = Array.from({ length: 24 }, (_, hour) => hour);
 
 const MAP_BOUNDS = {
   minLon: 174.75995,
@@ -129,6 +138,12 @@ const CHART_PADDING = {
   top: 28,
   right: 24,
   bottom: 52,
+  left: 72,
+};
+const WEEKLY_CHART_PADDING = {
+  top: 36,
+  right: 24,
+  bottom: 72,
   left: 72,
 };
 const MOVING_AVERAGE_MONTHS = 6;
@@ -528,6 +543,50 @@ function chartY(value: number, maxValue: number) {
   return CHART_HEIGHT - CHART_PADDING.bottom - scale * drawableHeight;
 }
 
+function weeklyChartX(index: number, total: number) {
+  const drawableWidth = CHART_WIDTH - WEEKLY_CHART_PADDING.left - WEEKLY_CHART_PADDING.right;
+  if (total <= 1) {
+    return WEEKLY_CHART_PADDING.left + drawableWidth / 2;
+  }
+  return WEEKLY_CHART_PADDING.left + (index / (total - 1)) * drawableWidth;
+}
+
+function weeklyChartY(value: number, maxValue: number) {
+  const drawableHeight = CHART_HEIGHT - WEEKLY_CHART_PADDING.top - WEEKLY_CHART_PADDING.bottom;
+  const scale = maxValue > 0 ? value / maxValue : 0;
+  return CHART_HEIGHT - WEEKLY_CHART_PADDING.bottom - scale * drawableHeight;
+}
+
+function weeklyLineSegments(
+  points: WeeklyComparisonPoint[],
+  key: "firstCount" | "secondCount",
+  yMax: number,
+) {
+  const lineSegments: string[] = [];
+  let currentSegment: string[] = [];
+
+  points.forEach((point, index) => {
+    const value = point[key];
+    if (value === null) {
+      if (currentSegment.length > 0) {
+        lineSegments.push(currentSegment.join(" "));
+        currentSegment = [];
+      }
+      return;
+    }
+
+    currentSegment.push(
+      `${weeklyChartX(index, points.length).toFixed(1)},${weeklyChartY(value, yMax).toFixed(1)}`,
+    );
+  });
+
+  if (currentSegment.length > 0) {
+    lineSegments.push(currentSegment.join(" "));
+  }
+
+  return lineSegments;
+}
+
 function NativeTrendChart({ points }: { points: TrendPoint[] }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const availablePoints = points.filter(
@@ -611,6 +670,15 @@ function NativeTrendChart({ points }: { points: TrendPoint[] }) {
       {lineSegments.map((linePoints, index) => (
         <polyline key={index} className="moving-average-line" points={linePoints} />
       ))}
+      <text
+        className="chart-axis-label"
+        x={18}
+        y={CHART_HEIGHT / 2}
+        textAnchor="middle"
+        transform={`rotate(-90 18 ${CHART_HEIGHT / 2})`}
+      >
+        Pedestrian counts
+      </text>
       {points.map((point, index) => {
         if (index % xTickStep !== 0 && index !== points.length - 1) {
           return null;
@@ -691,6 +759,215 @@ function NativeTrendChart({ points }: { points: TrendPoint[] }) {
             {hoveredPoint.movingAverage === null
               ? "not enough data"
               : `${formatCount(hoveredPoint.movingAverage)} pedestrians`}
+          </text>
+        </g>
+      ) : null}
+    </svg>
+  );
+}
+
+function NativeWeeklyComparisonChart({
+  points,
+  firstMonthLabel,
+  secondMonthLabel,
+}: {
+  points: WeeklyComparisonPoint[];
+  firstMonthLabel: string;
+  secondMonthLabel: string;
+}) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const values = points.flatMap((point) =>
+    [point.firstCount, point.secondCount].filter((value): value is number => value !== null),
+  );
+  const maxValue = Math.max(...values, 1);
+  const yMax = Math.ceil((maxValue * 1.1) / 100) * 100 || 100;
+  const yTicks = [0, yMax / 2, yMax];
+  const firstLineSegments = weeklyLineSegments(points, "firstCount", yMax);
+  const secondLineSegments = weeklyLineSegments(points, "secondCount", yMax);
+  const xTicks = [
+    ...DAYS_OF_WEEK.map((dayOfWeek) => ({
+      label: `${dayOfWeek.slice(0, 3)} ${formatHour(0)}`,
+      index: points.findIndex((point) => point.dayOfWeek === dayOfWeek && point.hour === 0),
+    })),
+    {
+      label: `Sun ${formatHour(23)}`,
+      index: points.length - 1,
+    },
+  ].filter((tick) => tick.index >= 0);
+  const hoveredPoint = hoveredIndex === null ? null : points[hoveredIndex];
+  const tooltipWidth = 250;
+  const tooltipHeight = 82;
+  const tooltipX =
+    hoveredIndex !== null
+      ? clamp(
+          weeklyChartX(hoveredIndex, points.length) + 12,
+          WEEKLY_CHART_PADDING.left,
+          CHART_WIDTH - WEEKLY_CHART_PADDING.right - tooltipWidth,
+        )
+      : WEEKLY_CHART_PADDING.left;
+  const hoveredMaxValue = hoveredPoint
+    ? Math.max(hoveredPoint.firstCount ?? 0, hoveredPoint.secondCount ?? 0)
+    : 0;
+  const tooltipY = hoveredPoint
+    ? clamp(
+        weeklyChartY(hoveredMaxValue, yMax) - tooltipHeight - 14,
+        WEEKLY_CHART_PADDING.top,
+        CHART_HEIGHT - WEEKLY_CHART_PADDING.bottom - tooltipHeight,
+      )
+    : WEEKLY_CHART_PADDING.top;
+
+  return (
+    <svg
+      className="trend-svg"
+      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+      role="img"
+      aria-label={`Hourly week pedestrian counts comparing ${firstMonthLabel} and ${secondMonthLabel}`}
+      onMouseLeave={() => setHoveredIndex(null)}
+    >
+      <rect className="chart-background" width={CHART_WIDTH} height={CHART_HEIGHT} rx="22" />
+      {yTicks.map((tick) => {
+        const y = weeklyChartY(tick, yMax);
+        return (
+          <g key={tick} className="chart-gridline">
+            <line
+              x1={WEEKLY_CHART_PADDING.left}
+              x2={CHART_WIDTH - WEEKLY_CHART_PADDING.right}
+              y1={y}
+              y2={y}
+            />
+            <text x={WEEKLY_CHART_PADDING.left - 14} y={y + 4} textAnchor="end">
+              {formatCompactCount(tick)}
+            </text>
+          </g>
+        );
+      })}
+      {xTicks.map((tick) => {
+        const x = weeklyChartX(tick.index, points.length);
+        return (
+          <g key={`${tick.label}-${tick.index}`} className="chart-x-tick">
+            <line
+              x1={x}
+              x2={x}
+              y1={CHART_HEIGHT - WEEKLY_CHART_PADDING.bottom}
+              y2={CHART_HEIGHT - WEEKLY_CHART_PADDING.bottom + 6}
+            />
+            <text x={x} y={CHART_HEIGHT - WEEKLY_CHART_PADDING.bottom + 25} textAnchor="middle">
+              {tick.label}
+            </text>
+          </g>
+        );
+      })}
+      <text
+        className="chart-axis-label"
+        x={CHART_WIDTH / 2}
+        y={CHART_HEIGHT - 18}
+        textAnchor="middle"
+      >
+        Hour of week
+      </text>
+      <text
+        className="chart-axis-label"
+        x={18}
+        y={CHART_HEIGHT / 2}
+        textAnchor="middle"
+        transform={`rotate(-90 18 ${CHART_HEIGHT / 2})`}
+      >
+        Pedestrian counts
+      </text>
+      {firstLineSegments.map((linePoints, index) => (
+        <polyline
+          key={`first-${index}`}
+          className="weekly-comparison-line weekly-comparison-line-first"
+          points={linePoints}
+        />
+      ))}
+      {secondLineSegments.map((linePoints, index) => (
+        <polyline
+          key={`second-${index}`}
+          className="weekly-comparison-line weekly-comparison-line-second"
+          points={linePoints}
+        />
+      ))}
+      {points.map((point, index) =>
+        point.firstCount === null ? null : (
+          <circle
+            key={`${point.label}-first-point`}
+            className="weekly-comparison-point weekly-comparison-point-first"
+            cx={weeklyChartX(index, points.length)}
+            cy={weeklyChartY(point.firstCount, yMax)}
+            r="3.2"
+          >
+            <title>
+              {firstMonthLabel}, {point.label}: {formatCount(point.firstCount)} pedestrians
+            </title>
+          </circle>
+        ),
+      )}
+      {points.map((point, index) =>
+        point.secondCount === null ? null : (
+          <circle
+            key={`${point.label}-second-point`}
+            className="weekly-comparison-point weekly-comparison-point-second"
+            cx={weeklyChartX(index, points.length)}
+            cy={weeklyChartY(point.secondCount, yMax)}
+            r="3.2"
+          >
+            <title>
+              {secondMonthLabel}, {point.label}: {formatCount(point.secondCount)} pedestrians
+            </title>
+          </circle>
+        ),
+      )}
+      {points.map((point, index) => (
+        <rect
+          key={`${point.label}-hover-zone`}
+          className="chart-hover-zone"
+          x={
+            index === 0
+              ? WEEKLY_CHART_PADDING.left
+              : (weeklyChartX(index - 1, points.length) + weeklyChartX(index, points.length)) / 2
+          }
+          y={WEEKLY_CHART_PADDING.top}
+          width={
+            index === points.length - 1
+              ? CHART_WIDTH -
+                WEEKLY_CHART_PADDING.right -
+                (weeklyChartX(index - 1, points.length) + weeklyChartX(index, points.length)) / 2
+              : (weeklyChartX(index + 1, points.length) -
+                  weeklyChartX(Math.max(0, index - 1), points.length)) /
+                2
+          }
+          height={CHART_HEIGHT - WEEKLY_CHART_PADDING.top - WEEKLY_CHART_PADDING.bottom}
+          onMouseEnter={() => setHoveredIndex(index)}
+          onFocus={() => setHoveredIndex(index)}
+        />
+      ))}
+      {hoveredPoint ? (
+        <g className="chart-hover" onMouseLeave={() => setHoveredIndex(null)}>
+          {hoveredIndex !== null ? (
+            <line
+              className="chart-hover-line"
+              x1={weeklyChartX(hoveredIndex, points.length)}
+              x2={weeklyChartX(hoveredIndex, points.length)}
+              y1={WEEKLY_CHART_PADDING.top}
+              y2={CHART_HEIGHT - WEEKLY_CHART_PADDING.bottom}
+            />
+          ) : null}
+          <rect x={tooltipX} y={tooltipY} width={tooltipWidth} height={tooltipHeight} rx="12" />
+          <text x={tooltipX + 12} y={tooltipY + 22}>
+            {hoveredPoint.label}
+          </text>
+          <text x={tooltipX + 12} y={tooltipY + 44}>
+            {firstMonthLabel}:{" "}
+            {hoveredPoint.firstCount === null
+              ? "no data"
+              : `${formatCount(hoveredPoint.firstCount)} pedestrians`}
+          </text>
+          <text x={tooltipX + 12} y={tooltipY + 64}>
+            {secondMonthLabel}:{" "}
+            {hoveredPoint.secondCount === null
+              ? "no data"
+              : `${formatCount(hoveredPoint.secondCount)} pedestrians`}
           </text>
         </g>
       ) : null}
@@ -820,6 +1097,9 @@ function App() {
   const [selectedTrendLocationId, setSelectedTrendLocationId] = useState("");
   const [selectedTrendDayOfWeek, setSelectedTrendDayOfWeek] = useState("");
   const [selectedTrendHour, setSelectedTrendHour] = useState(12);
+  const [selectedComparisonLocationId, setSelectedComparisonLocationId] = useState("");
+  const [selectedComparisonFirstMonth, setSelectedComparisonFirstMonth] = useState("");
+  const [selectedComparisonSecondMonth, setSelectedComparisonSecondMonth] = useState("");
   const [selectedTableDayOfWeek, setSelectedTableDayOfWeek] = useState("");
   const [selectedTableHour, setSelectedTableHour] = useState(12);
   const [isLoading, setIsLoading] = useState(true);
@@ -866,6 +1146,11 @@ function App() {
         setSelectedMapDayOfWeek(daysOfWeek[0] ?? "");
         setSelectedTrendLocationId(loadedLocations[0]?.location_id ?? "");
         setSelectedTrendDayOfWeek(daysOfWeek[0] ?? "");
+        setSelectedComparisonLocationId(loadedLocations[0]?.location_id ?? "");
+        setSelectedComparisonFirstMonth(
+          equivalentPreCovidMonth(months, months.at(-1)) ?? months[0] ?? "",
+        );
+        setSelectedComparisonSecondMonth(months.at(-1) ?? "");
         setSelectedTableDayOfWeek(daysOfWeek[0] ?? "");
         setSelectedHour(loadedHours.includes(12) ? 12 : (loadedHours[0] ?? 0));
         setSelectedTrendHour(loadedHours.includes(12) ? 12 : (loadedHours[0] ?? 0));
@@ -909,6 +1194,7 @@ function App() {
   );
 
   const selectedTrendLocation = locationById.get(selectedTrendLocationId);
+  const selectedComparisonLocation = locationById.get(selectedComparisonLocationId);
   const latestMonth = months.at(-1);
   const oneYearPriorMonth = sameMonthPreviousYear(months, latestMonth);
   const preCovidComparisonMonth = equivalentPreCovidMonth(months, latestMonth);
@@ -970,6 +1256,47 @@ function App() {
       })
       .filter((record): record is MarkerRecord => record !== null);
   }, [locationById, selectedHour, selectedMapDayOfWeek, selectedMonth, trafficRecords]);
+
+  const weeklyComparisonPoints = useMemo<WeeklyComparisonPoint[]>(() => {
+    const countByMonthDayHour = new Map<string, number>();
+
+    trafficRecords
+      .filter(
+        (record) =>
+          record.location_id === selectedComparisonLocationId &&
+          (record.month === selectedComparisonFirstMonth ||
+            record.month === selectedComparisonSecondMonth),
+      )
+      .forEach((record) => {
+        countByMonthDayHour.set(
+          [record.month, record.day_of_week, record.hour].join("|"),
+          record.avg_count,
+        );
+      });
+
+    return DAYS_OF_WEEK.flatMap((dayOfWeek) =>
+      HOURS_OF_DAY.map((hour) => ({
+        dayOfWeek,
+        hour,
+        label: `${dayOfWeek} ${formatHour(hour)}`,
+        firstCount:
+          countByMonthDayHour.get([selectedComparisonFirstMonth, dayOfWeek, hour].join("|")) ??
+          null,
+        secondCount:
+          countByMonthDayHour.get([selectedComparisonSecondMonth, dayOfWeek, hour].join("|")) ??
+          null,
+      })),
+    );
+  }, [
+    selectedComparisonFirstMonth,
+    selectedComparisonLocationId,
+    selectedComparisonSecondMonth,
+    trafficRecords,
+  ]);
+
+  const availableWeeklyComparisonPointCount = weeklyComparisonPoints.filter(
+    (point) => point.firstCount !== null || point.secondCount !== null,
+  ).length;
 
   const summaryTableRows = useMemo<SummaryTableRow[]>(() => {
     const countsByLocation = new Map<string, Map<string, number>>();
@@ -1287,12 +1614,116 @@ function App() {
         )}
       </section>
 
+      <section className="summary-panel" aria-labelledby="comparison-title">
+        <div className="panel-header">
+          <div>
+            <h2 id="comparison-title">
+              {selectedComparisonLocation?.display_name ?? "Select a location"} by hour of week
+            </h2>
+          </div>
+          <p className="map-summary" aria-live="polite">
+            {availableWeeklyComparisonPointCount
+              ? `${availableWeeklyComparisonPointCount} hourly points`
+              : "No comparison data for this selection"}
+          </p>
+        </div>
+
+        <div className="controls comparison-controls" aria-label="Weekly comparison filters">
+          <label>
+            <span>Location</span>
+            <select
+              value={selectedComparisonLocationId}
+              onChange={(event) => setSelectedComparisonLocationId(event.target.value)}
+              disabled={isLoading || locations.length === 0}
+            >
+              {locations.map((location) => (
+                <option key={location.location_id} value={location.location_id}>
+                  {location.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>First month</span>
+            <select
+              value={selectedComparisonFirstMonth}
+              onChange={(event) => setSelectedComparisonFirstMonth(event.target.value)}
+              disabled={isLoading || months.length === 0}
+            >
+              {months.map((month) => (
+                <option key={month} value={month}>
+                  {formatMonth(month)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Second month</span>
+            <select
+              value={selectedComparisonSecondMonth}
+              onChange={(event) => setSelectedComparisonSecondMonth(event.target.value)}
+              disabled={isLoading || months.length === 0}
+            >
+              {months.map((month) => (
+                <option key={month} value={month}>
+                  {formatMonth(month)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="chart-copy">
+          <p>
+            Compare raw average hourly pedestrian counts from Monday midnight through Sunday 11pm.
+          </p>
+        </div>
+
+        {availableWeeklyComparisonPointCount > 0 ? (
+          <>
+            <div className="comparison-legend" aria-hidden="true">
+              <span>
+                <span className="legend-swatch legend-swatch-first" />
+                {selectedComparisonFirstMonth
+                  ? formatMonth(selectedComparisonFirstMonth)
+                  : "First month"}
+              </span>
+              <span>
+                <span className="legend-swatch legend-swatch-second" />
+                {selectedComparisonSecondMonth
+                  ? formatMonth(selectedComparisonSecondMonth)
+                  : "Second month"}
+              </span>
+            </div>
+            <div className="chart-frame">
+              <NativeWeeklyComparisonChart
+                points={weeklyComparisonPoints}
+                firstMonthLabel={
+                  selectedComparisonFirstMonth
+                    ? formatMonth(selectedComparisonFirstMonth)
+                    : "First month"
+                }
+                secondMonthLabel={
+                  selectedComparisonSecondMonth
+                    ? formatMonth(selectedComparisonSecondMonth)
+                    : "Second month"
+                }
+              />
+            </div>
+          </>
+        ) : (
+          <div className="map-error" role="status">
+            Choose a different location or month pair to compare the hourly week pattern.
+          </div>
+        )}
+      </section>
+
       <section className="summary-panel" aria-labelledby="summary-title">
         <div className="panel-header">
           <div>
-            <h2 id="summary-title">
-              Current 6-month averages at {formatHour(selectedTableHour)}
-            </h2>
+            <h2 id="summary-title">Current 6-month averages at {formatHour(selectedTableHour)}</h2>
           </div>
           <p className="map-summary" aria-live="polite">
             {availableSummaryRowCount
@@ -1335,8 +1766,9 @@ function App() {
 
         <div className="chart-copy">
           <p>
-            Current values use the 6 months ending {latestMonth ? formatMonth(latestMonth) : "the latest month"}.
-            One-year and pre-COVID changes compare against the equivalent 6-month windows ending{" "}
+            Current values use the 6 months ending{" "}
+            {latestMonth ? formatMonth(latestMonth) : "the latest month"}. One-year and pre-COVID
+            changes compare against the equivalent 6-month windows ending{" "}
             {oneYearPriorMonth ? formatMonth(oneYearPriorMonth) : "one year earlier"} and{" "}
             {preCovidComparisonMonth ? formatMonth(preCovidComparisonMonth) : "before COVID"}.
           </p>

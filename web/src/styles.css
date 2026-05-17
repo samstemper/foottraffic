@@ -171,6 +171,10 @@ h2 {
   max-width: 34rem;
 }
 
+.comparison-controls {
+  grid-template-columns: minmax(0, 2fr) minmax(10rem, 1fr) minmax(10rem, 1fr);
+}
+
 .controls select:focus-visible,
 .flow-marker:focus-visible {
   outline: 3px solid #111111;
@@ -314,7 +318,8 @@ h2 {
 }
 
 .chart-gridline text,
-.chart-x-tick text {
+.chart-x-tick text,
+.chart-axis-label {
   fill: #4b4b4b;
   font-size: 0.78rem;
   font-weight: 700;
@@ -360,6 +365,64 @@ h2 {
   stroke: #ffffff;
   stroke-width: 2;
   opacity: 0.72;
+}
+
+.comparison-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem 1.25rem;
+  align-items: center;
+  margin: -0.35rem 0 0.8rem;
+  color: #262626;
+  font-weight: 800;
+}
+
+.comparison-legend span {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.legend-swatch {
+  width: 1.25rem;
+  height: 0.35rem;
+  border-radius: 999px;
+}
+
+.legend-swatch-first {
+  background: #111111;
+}
+
+.legend-swatch-second {
+  background: #e4542f;
+}
+
+.weekly-comparison-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.weekly-comparison-line-first {
+  stroke: #111111;
+}
+
+.weekly-comparison-line-second {
+  stroke: #e4542f;
+}
+
+.weekly-comparison-point {
+  stroke: #ffffff;
+  stroke-width: 1.8;
+}
+
+.weekly-comparison-point-first {
+  fill: #111111;
+}
+
+.weekly-comparison-point-second {
+  fill: #e4542f;
 }
 
 .table-frame {
@@ -653,6 +716,7 @@ h2 {
   }
 
   .chart-controls,
+  .comparison-controls,
   .table-controls {
     grid-template-columns: 1fr;
   }

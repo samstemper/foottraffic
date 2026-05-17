@@ -78,6 +78,7 @@ type FlowPath = {
 type FlowParticle = {
   key: string;
   path: string;
+  staticPoint: Point;
   duration: number;
   begin: number;
   activeKeyTime: number;
@@ -110,17 +111,18 @@ const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 760;
 const FLOW_PATH_LENGTH = 112;
 const FLOW_DOT_SPEED = 42;
-const FLOW_SIMULATED_SECONDS_PER_REAL_SECOND = 10;
+const FLOW_SIMULATED_SECONDS_PER_REAL_SECOND = 5;
 const FLOW_REAL_SECONDS_PER_TRAFFIC_MINUTE = 60 / FLOW_SIMULATED_SECONDS_PER_REAL_SECOND;
 const FLOW_MAX_TRAVEL_SECONDS = (FLOW_PATH_LENGTH + 72) / FLOW_DOT_SPEED;
-const FLOW_DOT_RADIUS = 2.4;
-const FLOW_ANCHOR_RADIUS = 4.8;
+const FLOW_DOT_RADIUS = 3.6;
+const FLOW_ANCHOR_RADIUS = 7.2;
 const FLOW_MAX_PARTICLES_PER_LOCATION = 40;
 const FLOW_MIN_SPAWN_INTERVAL_SECONDS = 0.08;
 const FLOW_MIN_CYCLE_DURATION_SECONDS = 0.8;
 const FLOW_MAX_CYCLE_DURATION_SECONDS = 30;
 const FLOW_EDGE_OPACITY = 0.04;
 const FLOW_PEAK_OPACITY = 0.72;
+const FLOW_STATIC_OPACITY = 0.42;
 const CHART_WIDTH = 960;
 const CHART_HEIGHT = 420;
 const CHART_PADDING = {
@@ -627,6 +629,37 @@ function flowPathD(path: FlowPath) {
   ].join(" ");
 }
 
+function pointBetween(start: Point, end: Point, progress: number): Point {
+  return {
+    x: start.x + (end.x - start.x) * progress,
+    y: start.y + (end.y - start.y) * progress,
+  };
+}
+
+function distanceBetween(start: Point, end: Point) {
+  return Math.hypot(end.x - start.x, end.y - start.y);
+}
+
+function pointAlongFlowPath(path: FlowPath, progress: number): Point {
+  const firstSegmentDistance = distanceBetween(path.start, path.middle);
+  const secondSegmentDistance = distanceBetween(path.middle, path.end);
+  const targetDistance = path.distance * clamp(progress, 0, 1);
+
+  if (targetDistance <= firstSegmentDistance || secondSegmentDistance === 0) {
+    return pointBetween(
+      path.start,
+      path.middle,
+      firstSegmentDistance === 0 ? 1 : targetDistance / firstSegmentDistance,
+    );
+  }
+
+  return pointBetween(
+    path.middle,
+    path.end,
+    (targetDistance - firstSegmentDistance) / secondSegmentDistance,
+  );
+}
+
 function flowMotionTiming(path: FlowPath, animationTiming: FlowAnimationTiming) {
   const flowDuration = path.distance / FLOW_DOT_SPEED;
   const activeKeyTime = clamp(flowDuration / animationTiming.cycleDuration, 0.001, 0.998);
@@ -963,10 +996,15 @@ function FlowStreams({
                 index % 2 === 1,
               );
               const { duration, activeKeyTime } = flowMotionTiming(motionPath, animationTiming);
+              const staticProgress =
+                animationTiming.particleCount === 1
+                  ? 0.5
+                  : index / (animationTiming.particleCount - 1);
 
               return {
                 key: `${record.location_id}-${index}`,
                 path: flowPathD(motionPath),
+                staticPoint: pointAlongFlowPath(motionPath, staticProgress),
                 duration,
                 begin: -index * animationTiming.spawnInterval,
                 activeKeyTime,
@@ -992,30 +1030,38 @@ function FlowStreams({
               const peakKeyTime = particle.activeKeyTime / 2;
 
               return (
-                <circle
-                  key={particle.key}
-                  className="flow-dot"
-                  r={FLOW_DOT_RADIUS}
-                  opacity={FLOW_EDGE_OPACITY}
-                >
-                  <animateMotion
-                    path={particle.path}
-                    dur={`${particle.duration}s`}
-                    begin={`${particle.begin}s`}
-                    keyPoints={`0;1;1`}
-                    keyTimes={`0;${particle.activeKeyTime};1`}
-                    calcMode="linear"
-                    repeatCount="indefinite"
+                <g key={particle.key}>
+                  <circle
+                    className="flow-dot flow-dot-static"
+                    cx={particle.staticPoint.x}
+                    cy={particle.staticPoint.y}
+                    r={FLOW_DOT_RADIUS}
+                    opacity={FLOW_STATIC_OPACITY}
                   />
-                  <animate
-                    attributeName="opacity"
-                    values={`${FLOW_EDGE_OPACITY};${FLOW_PEAK_OPACITY};${FLOW_EDGE_OPACITY};${FLOW_EDGE_OPACITY}`}
-                    keyTimes={`0;${peakKeyTime};${particle.activeKeyTime};1`}
-                    dur={`${particle.duration}s`}
-                    begin={`${particle.begin}s`}
-                    repeatCount="indefinite"
-                  />
-                </circle>
+                  <circle
+                    className="flow-dot flow-dot-motion"
+                    r={FLOW_DOT_RADIUS}
+                    opacity={FLOW_EDGE_OPACITY}
+                  >
+                    <animateMotion
+                      path={particle.path}
+                      dur={`${particle.duration}s`}
+                      begin={`${particle.begin}s`}
+                      keyPoints={`0;1;1`}
+                      keyTimes={`0;${particle.activeKeyTime};1`}
+                      calcMode="linear"
+                      repeatCount="indefinite"
+                    />
+                    <animate
+                      attributeName="opacity"
+                      values={`${FLOW_EDGE_OPACITY};${FLOW_PEAK_OPACITY};${FLOW_EDGE_OPACITY};${FLOW_EDGE_OPACITY}`}
+                      keyTimes={`0;${peakKeyTime};${particle.activeKeyTime};1`}
+                      dur={`${particle.duration}s`}
+                      begin={`${particle.begin}s`}
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                </g>
               );
             })}
             <circle

@@ -62,6 +62,12 @@ type Point = {
   y: number;
 };
 
+type FlowAnimationTiming = {
+  particleCount: number;
+  spawnInterval: number;
+  cycleDuration: number;
+};
+
 const DATA_URLS = {
   locations: `${import.meta.env.BASE_URL}data/locations.json`,
   counts: `${import.meta.env.BASE_URL}data/foottraffic-month-hour-weekday.json`,
@@ -94,6 +100,10 @@ const FLOW_REAL_SECONDS_PER_TRAFFIC_MINUTE = 60 / FLOW_SIMULATED_SECONDS_PER_REA
 const FLOW_MAX_TRAVEL_SECONDS = (FLOW_PATH_LENGTH + 72) / FLOW_DOT_SPEED;
 const FLOW_DOT_RADIUS = 2.4;
 const FLOW_ANCHOR_RADIUS = 4.8;
+const FLOW_MAX_PARTICLES_PER_LOCATION = 40;
+const FLOW_MIN_SPAWN_INTERVAL_SECONDS = 0.08;
+const FLOW_MIN_CYCLE_DURATION_SECONDS = 0.8;
+const FLOW_MAX_CYCLE_DURATION_SECONDS = 30;
 const CHART_WIDTH = 960;
 const CHART_HEIGHT = 420;
 const CHART_PADDING = {
@@ -549,9 +559,78 @@ function flowPath(point: Point, length: number, seed: string, roads: Street[], r
 
   return {
     distance: pathDistance,
+    start: pathStart,
+    middle: point,
+    end: pathEnd,
     d: `M ${pathStart.x.toFixed(1)} ${pathStart.y.toFixed(1)} L ${point.x.toFixed(
       1,
     )} ${point.y.toFixed(1)} L ${pathEnd.x.toFixed(1)} ${pathEnd.y.toFixed(1)}`,
+  };
+}
+
+function flowAnimationTiming(avgCount: number): FlowAnimationTiming | null {
+  const pedestriansPerSecond =
+    (avgCount / 3600) * FLOW_SIMULATED_SECONDS_PER_REAL_SECOND;
+
+  if (!Number.isFinite(pedestriansPerSecond) || pedestriansPerSecond <= 0) {
+    return null;
+  }
+
+  const rawParticleCount = Math.ceil(pedestriansPerSecond * FLOW_MAX_TRAVEL_SECONDS);
+  const particleCount = clamp(rawParticleCount, 1, FLOW_MAX_PARTICLES_PER_LOCATION);
+  const rawSpawnInterval = 1 / pedestriansPerSecond;
+  const rawCycleDuration = rawSpawnInterval * particleCount;
+
+  if (
+    !Number.isFinite(rawSpawnInterval) ||
+    rawSpawnInterval <= 0 ||
+    !Number.isFinite(rawCycleDuration) ||
+    rawCycleDuration <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    particleCount,
+    spawnInterval: clamp(
+      rawSpawnInterval,
+      FLOW_MIN_SPAWN_INTERVAL_SECONDS,
+      FLOW_MAX_CYCLE_DURATION_SECONDS,
+    ),
+    cycleDuration: clamp(
+      rawCycleDuration,
+      FLOW_MIN_CYCLE_DURATION_SECONDS,
+      FLOW_MAX_CYCLE_DURATION_SECONDS,
+    ),
+  };
+}
+
+function supportsSvgAnimateMotion() {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return false;
+  }
+
+  const motionElement = document.createElementNS("http://www.w3.org/2000/svg", "animateMotion");
+  return (
+    "SVGAnimateMotionElement" in window ||
+    typeof (motionElement as SVGElement & { beginElement?: () => void }).beginElement ===
+      "function"
+  );
+}
+
+function fallbackFlowPosition(
+  path: ReturnType<typeof flowPath>,
+  index: number,
+  particleCount: number,
+) {
+  const progress = particleCount <= 1 ? 0.5 : index / (particleCount - 1);
+  const segmentProgress = progress <= 0.5 ? progress * 2 : (progress - 0.5) * 2;
+  const start = progress <= 0.5 ? path.start : path.middle;
+  const end = progress <= 0.5 ? path.middle : path.end;
+
+  return {
+    x: start.x + (end.x - start.x) * segmentProgress,
+    y: start.y + (end.y - start.y) * segmentProgress,
   };
 }
 
@@ -864,6 +943,7 @@ function App() {
   const [selectedTableHour, setSelectedTableHour] = useState(12);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [canAnimateSvgMotion, setCanAnimateSvgMotion] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -926,6 +1006,10 @@ function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    setCanAnimateSvgMotion(supportsSvgAnimateMotion());
   }, []);
 
   const months = useMemo(
@@ -1205,68 +1289,95 @@ function App() {
                     record.location.longitude,
                     record.location.latitude,
                   ]);
-                  const pedestriansPerSecond =
-                    (record.avg_count / 3600) * FLOW_SIMULATED_SECONDS_PER_REAL_SECOND;
-                  const particleCount = Math.max(
-                    1,
-                    Math.ceil(pedestriansPerSecond * FLOW_MAX_TRAVEL_SECONDS),
-                  );
-                  const spawnInterval = 1 / pedestriansPerSecond;
-                  const cycleDuration = spawnInterval * particleCount;
+                  const animationTiming = flowAnimationTiming(record.avg_count);
                   const edgeOpacity = 0.04;
                   const peakOpacity = 0.72;
 
                   return (
                     <g key={record.location_id}>
-                      {Array.from({ length: particleCount }, (_, index) => {
-                        const motionPath = flowPath(
-                          point,
-                          FLOW_PATH_LENGTH,
-                          [
-                            record.location_id,
-                            record.month,
-                            record.day_of_week,
-                            record.hour,
-                            index,
-                          ].join(":"),
-                          mapRoads,
-                          index % 2 === 1,
-                        );
-                        const flowDuration = motionPath.distance / FLOW_DOT_SPEED;
-                        const activeKeyTime = clamp(flowDuration / cycleDuration, 0.001, 1);
-                        const opacityRestKeyTime = clamp(activeKeyTime + 0.001, 0.001, 1);
-                        const begin = `${-index * spawnInterval}s`;
+                      {animationTiming && canAnimateSvgMotion
+                        ? Array.from({ length: animationTiming.particleCount }, (_, index) => {
+                            const motionPath = flowPath(
+                              point,
+                              FLOW_PATH_LENGTH,
+                              [
+                                record.location_id,
+                                record.month,
+                                record.day_of_week,
+                                record.hour,
+                                index,
+                              ].join(":"),
+                              mapRoads,
+                              index % 2 === 1,
+                            );
+                            const flowDuration = motionPath.distance / FLOW_DOT_SPEED;
+                            const activeKeyTime = clamp(
+                              flowDuration / animationTiming.cycleDuration,
+                              0.001,
+                              0.998,
+                            );
+                            const opacityRestKeyTime = clamp(activeKeyTime + 0.001, 0.001, 0.999);
+                            const begin = `${-index * animationTiming.spawnInterval}s`;
 
-                        return (
-                          <circle
-                            key={index}
-                            className="flow-dot"
-                            r={FLOW_DOT_RADIUS}
-                          >
-                            <animate
-                              attributeName="opacity"
-                              dur={`${cycleDuration}s`}
-                              begin={begin}
-                              values={`${edgeOpacity};${peakOpacity};${edgeOpacity};0;0`}
-                              keyTimes={`0;${(activeKeyTime / 2).toFixed(
-                                4,
-                              )};${activeKeyTime.toFixed(4)};${opacityRestKeyTime.toFixed(
-                                4,
-                              )};1`}
-                              repeatCount="indefinite"
-                            />
-                            <animateMotion
-                              dur={`${cycleDuration}s`}
-                              begin={begin}
-                              calcMode="linear"
-                              keyPoints="0;1;1"
-                              keyTimes={`0;${activeKeyTime.toFixed(4)};1`}
-                              repeatCount="indefinite"
-                              path={motionPath.d}
-                            />
-                          </circle>
-                        );
-                      })}
+                            return (
+                              <circle key={index} className="flow-dot" r={FLOW_DOT_RADIUS}>
+                                <animate
+                                  attributeName="opacity"
+                                  dur={`${animationTiming.cycleDuration}s`}
+                                  begin={begin}
+                                  values={`${edgeOpacity};${peakOpacity};${edgeOpacity};0;0`}
+                                  keyTimes={`0;${(activeKeyTime / 2).toFixed(
+                                    4,
+                                  )};${activeKeyTime.toFixed(4)};${opacityRestKeyTime.toFixed(
+                                    4,
+                                  )};1`}
+                                  repeatCount="indefinite"
+                                />
+                                <animateMotion
+                                  dur={`${animationTiming.cycleDuration}s`}
+                                  begin={begin}
+                                  calcMode="linear"
+                                  keyPoints="0;1;1"
+                                  keyTimes={`0;${activeKeyTime.toFixed(4)};1`}
+                                  repeatCount="indefinite"
+                                  path={motionPath.d}
+                                />
+                              </circle>
+                            );
+                          })
+                        : null}
+                      {animationTiming && !canAnimateSvgMotion
+                        ? Array.from({ length: animationTiming.particleCount }, (_, index) => {
+                            const motionPath = flowPath(
+                              point,
+                              FLOW_PATH_LENGTH,
+                              [
+                                record.location_id,
+                                record.month,
+                                record.day_of_week,
+                                record.hour,
+                                index,
+                              ].join(":"),
+                              mapRoads,
+                              index % 2 === 1,
+                            );
+                            const fallbackPoint = fallbackFlowPosition(
+                              motionPath,
+                              index,
+                              animationTiming.particleCount,
+                            );
+
+                            return (
+                              <circle
+                                key={`fallback-${index}`}
+                                className="flow-dot flow-dot-fallback"
+                                cx={fallbackPoint.x}
+                                cy={fallbackPoint.y}
+                                r={FLOW_DOT_RADIUS}
+                              />
+                            );
+                          })
+                        : null}
                       <circle
                         className="flow-anchor"
                         cx={point.x}

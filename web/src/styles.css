@@ -256,6 +256,10 @@ h2 {
   opacity: 0;
 }
 
+.flow-dot-fallback {
+  opacity: 0.42;
+}
+
 .flow-anchor {
   fill: #111111;
   stroke: #ffffff;
@@ -526,6 +530,10 @@ h2 {
 @media (prefers-reduced-motion: reduce) {
   .flow-dot {
     display: none;
+  }
+
+  .flow-dot-fallback {
+    display: inline;
   }
 }
 

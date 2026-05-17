@@ -541,6 +541,14 @@ h2 {
     padding: clamp(1rem, 2vw, 1.75rem);
   }
 
+  .hero,
+  .map-panel,
+  .chart-panel,
+  .summary-panel,
+  .site-footer {
+    width: min(100%, 56rem);
+  }
+
   .hero {
     margin-bottom: 1rem;
     padding: clamp(1.5rem, 2.6vw, 2.4rem);

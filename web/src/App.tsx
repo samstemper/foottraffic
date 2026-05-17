@@ -75,6 +75,14 @@ type FlowPath = {
   end: Point;
 };
 
+type FlowParticle = {
+  key: string;
+  path: string;
+  duration: number;
+  begin: number;
+  activeKeyTime: number;
+};
+
 const DATA_URLS = {
   locations: `${import.meta.env.BASE_URL}data/locations.json`,
   counts: `${import.meta.env.BASE_URL}data/foottraffic-month-hour-weekday.json`,
@@ -111,6 +119,8 @@ const FLOW_MAX_PARTICLES_PER_LOCATION = 40;
 const FLOW_MIN_SPAWN_INTERVAL_SECONDS = 0.08;
 const FLOW_MIN_CYCLE_DURATION_SECONDS = 0.8;
 const FLOW_MAX_CYCLE_DURATION_SECONDS = 30;
+const FLOW_EDGE_OPACITY = 0.04;
+const FLOW_PEAK_OPACITY = 0.72;
 const CHART_WIDTH = 960;
 const CHART_HEIGHT = 420;
 const CHART_PADDING = {
@@ -471,10 +481,6 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function positiveModulo(value: number, divisor: number) {
-  return ((value % divisor) + divisor) % divisor;
-}
-
 function closestPointOnSegment(point: Point, start: Point, end: Point) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -613,52 +619,21 @@ function flowAnimationTiming(avgCount: number): FlowAnimationTiming | null {
   };
 }
 
-function flowPointAtProgress(path: FlowPath, progress: number) {
-  const firstSegmentDistance = Math.hypot(path.middle.x - path.start.x, path.middle.y - path.start.y);
-  const pathDistance = path.distance || 1;
-  const distanceAlongPath = clamp(progress, 0, 1) * pathDistance;
-  const isFirstSegment = distanceAlongPath <= firstSegmentDistance;
-  const segmentStart = isFirstSegment ? path.start : path.middle;
-  const segmentEnd = isFirstSegment ? path.middle : path.end;
-  const segmentDistance = isFirstSegment
-    ? firstSegmentDistance
-    : Math.hypot(path.end.x - path.middle.x, path.end.y - path.middle.y);
-  const segmentDistanceAlong = isFirstSegment
-    ? distanceAlongPath
-    : distanceAlongPath - firstSegmentDistance;
-  const segmentProgress = segmentDistance === 0 ? 0 : segmentDistanceAlong / segmentDistance;
-
-  return {
-    x: segmentStart.x + (segmentEnd.x - segmentStart.x) * segmentProgress,
-    y: segmentStart.y + (segmentEnd.y - segmentStart.y) * segmentProgress,
-  };
+function flowPathD(path: FlowPath) {
+  return [
+    `M ${path.start.x.toFixed(1)} ${path.start.y.toFixed(1)}`,
+    `L ${path.middle.x.toFixed(1)} ${path.middle.y.toFixed(1)}`,
+    `L ${path.end.x.toFixed(1)} ${path.end.y.toFixed(1)}`,
+  ].join(" ");
 }
 
-function flowDotFrame(
-  path: FlowPath,
-  animationTiming: FlowAnimationTiming,
-  index: number,
-  elapsedSeconds: number,
-) {
-  const edgeOpacity = 0.04;
-  const peakOpacity = 0.72;
+function flowMotionTiming(path: FlowPath, animationTiming: FlowAnimationTiming) {
   const flowDuration = path.distance / FLOW_DOT_SPEED;
   const activeKeyTime = clamp(flowDuration / animationTiming.cycleDuration, 0.001, 0.998);
-  const cycleElapsed = positiveModulo(
-    elapsedSeconds + index * animationTiming.spawnInterval,
-    animationTiming.cycleDuration,
-  );
-  const cycleProgress = cycleElapsed / animationTiming.cycleDuration;
-  const pathProgress = clamp(cycleProgress / activeKeyTime, 0, 1);
-  const fadeProgress = clamp(cycleProgress / activeKeyTime, 0, 1);
-  const opacity =
-    fadeProgress <= 0.5
-      ? edgeOpacity + (peakOpacity - edgeOpacity) * (fadeProgress * 2)
-      : peakOpacity - (peakOpacity - edgeOpacity) * ((fadeProgress - 0.5) * 2);
 
   return {
-    ...flowPointAtProgress(path, pathProgress),
-    opacity: Math.max(edgeOpacity, opacity),
+    duration: animationTiming.cycleDuration,
+    activeKeyTime,
   };
 }
 
@@ -964,73 +939,89 @@ function FlowStreams({
   visibleRecords: MarkerRecord[];
   mapRoads: Street[];
 }) {
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  useEffect(() => {
-    let animationFrameId = 0;
-    const startedAt = performance.now();
-
-    function tick(now: number) {
-      setElapsedSeconds((now - startedAt) / 1000);
-      animationFrameId = window.requestAnimationFrame(tick);
-    }
-
-    animationFrameId = window.requestAnimationFrame(tick);
-
-    return () => {
-      window.cancelAnimationFrame(animationFrameId);
-    };
-  }, []);
-
-  return (
-    <g className="flow-streams" aria-hidden="true">
-      {visibleRecords.map((record) => {
+  const streams = useMemo(
+    () =>
+      visibleRecords.map((record) => {
         const point = projectCoordinate([
           record.location.longitude,
           record.location.latitude,
         ]);
         const animationTiming = flowAnimationTiming(record.avg_count);
+        const particles: FlowParticle[] = animationTiming
+          ? Array.from({ length: animationTiming.particleCount }, (_, index) => {
+              const motionPath = flowPath(
+                point,
+                FLOW_PATH_LENGTH,
+                [
+                  record.location_id,
+                  record.month,
+                  record.day_of_week,
+                  record.hour,
+                  index,
+                ].join(":"),
+                mapRoads,
+                index % 2 === 1,
+              );
+              const { duration, activeKeyTime } = flowMotionTiming(motionPath, animationTiming);
 
+              return {
+                key: `${record.location_id}-${index}`,
+                path: flowPathD(motionPath),
+                duration,
+                begin: -index * animationTiming.spawnInterval,
+                activeKeyTime,
+              };
+            })
+          : [];
+
+        return {
+          key: record.location_id,
+          point,
+          particles,
+        };
+      }),
+    [mapRoads, visibleRecords],
+  );
+
+  return (
+    <g className="flow-streams" aria-hidden="true">
+      {streams.map((stream) => {
         return (
-          <g key={record.location_id}>
-            {animationTiming
-              ? Array.from({ length: animationTiming.particleCount }, (_, index) => {
-                  const motionPath = flowPath(
-                    point,
-                    FLOW_PATH_LENGTH,
-                    [
-                      record.location_id,
-                      record.month,
-                      record.day_of_week,
-                      record.hour,
-                      index,
-                    ].join(":"),
-                    mapRoads,
-                    index % 2 === 1,
-                  );
-                  const frame = flowDotFrame(
-                    motionPath,
-                    animationTiming,
-                    index,
-                    elapsedSeconds,
-                  );
+          <g key={stream.key}>
+            {stream.particles.map((particle) => {
+              const peakKeyTime = particle.activeKeyTime / 2;
 
-                  return (
-                    <circle
-                      key={index}
-                      className="flow-dot"
-                      cx={frame.x}
-                      cy={frame.y}
-                      r={FLOW_DOT_RADIUS}
-                      opacity={frame.opacity}
-                    />
-                  );
-                })
-              : null}
+              return (
+                <circle
+                  key={particle.key}
+                  className="flow-dot"
+                  r={FLOW_DOT_RADIUS}
+                  opacity={FLOW_EDGE_OPACITY}
+                >
+                  <animateMotion
+                    path={particle.path}
+                    dur={`${particle.duration}s`}
+                    begin={`${particle.begin}s`}
+                    keyPoints={`0;1;1`}
+                    keyTimes={`0;${particle.activeKeyTime};1`}
+                    calcMode="linear"
+                    repeatCount="indefinite"
+                  />
+                  <animate
+                    attributeName="opacity"
+                    values={`${FLOW_EDGE_OPACITY};${FLOW_PEAK_OPACITY};${FLOW_EDGE_OPACITY};${FLOW_EDGE_OPACITY}`}
+                    keyTimes={`0;${peakKeyTime};${particle.activeKeyTime};1`}
+                    dur={`${particle.duration}s`}
+                    begin={`${particle.begin}s`}
+                    repeatCount="indefinite"
+                  />
+                </circle>
+              );
+            })}
             <circle
               className="flow-anchor"
-              cx={point.x}
-              cy={point.y}
+              cx={stream.point.x}
+              cy={stream.point.y}
               r={FLOW_ANCHOR_RADIUS}
             />
           </g>

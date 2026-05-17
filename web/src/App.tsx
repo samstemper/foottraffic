@@ -63,9 +63,9 @@ type Point = {
 };
 
 const DATA_URLS = {
-  locations: "/data/locations.json",
-  counts: "/data/foottraffic-month-hour-weekday.json",
-  basemap: "/data/cbd-basemap.json",
+  locations: `${import.meta.env.BASE_URL}data/locations.json`,
+  counts: `${import.meta.env.BASE_URL}data/foottraffic-month-hour-weekday.json`,
+  basemap: `${import.meta.env.BASE_URL}data/cbd-basemap.json`,
 };
 
 const DAYS_OF_WEEK = [

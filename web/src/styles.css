@@ -39,12 +39,6 @@ textarea {
   background-size: 28px 28px;
 }
 
-@media (min-width: 960px) {
-  .app-shell {
-    zoom: 67%;
-  }
-}
-
 .hero {
   width: min(100%, 86rem);
   margin: 0 auto 1.25rem;

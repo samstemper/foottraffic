@@ -27,6 +27,14 @@ type TrendPoint = {
   movingAverage: number | null;
 };
 
+type SummaryTableRow = {
+  locationId: string;
+  locationName: string;
+  currentAverage: number | null;
+  oneYearChange: number | null;
+  preCovidChange: number | null;
+};
+
 type Coordinate = [number, number];
 
 type Street = {
@@ -82,6 +90,7 @@ const MAP_HEIGHT = 760;
 const FLOW_PATH_LENGTH = 112;
 const FLOW_DOT_SPEED = 42;
 const FLOW_SIMULATED_SECONDS_PER_REAL_SECOND = 6;
+const FLOW_REAL_SECONDS_PER_TRAFFIC_MINUTE = 60 / FLOW_SIMULATED_SECONDS_PER_REAL_SECOND;
 const FLOW_MAX_TRAVEL_SECONDS = (FLOW_PATH_LENGTH + 72) / FLOW_DOT_SPEED;
 const FLOW_DOT_RADIUS = 2.4;
 const FLOW_ANCHOR_RADIUS = 4.8;
@@ -95,6 +104,7 @@ const CHART_PADDING = {
 };
 const MOVING_AVERAGE_MONTHS = 6;
 const MIN_CONSECUTIVE_MONTHS_FOR_AVERAGE = 6;
+const PRE_COVID_CUTOFF_MONTH = "2020-03";
 const MAP_PADDING = 28;
 const METERS_PER_DEGREE_LATITUDE = 111_320;
 const MAP_VERTICAL_SCALE = 0.42;
@@ -588,6 +598,74 @@ function formatCompactCount(value: number) {
   }).format(value);
 }
 
+function formatPercentChange(value: number | null) {
+  if (value === null) {
+    return "Not enough data";
+  }
+
+  return new Intl.NumberFormat("en-NZ", {
+    maximumFractionDigits: 0,
+    signDisplay: "exceptZero",
+    style: "percent",
+  }).format(value);
+}
+
+function rollingAverageForMonth(
+  months: string[],
+  countByMonth: Map<string, number>,
+  endMonth: string | undefined,
+) {
+  if (!endMonth) {
+    return null;
+  }
+
+  const endIndex = months.indexOf(endMonth);
+  if (endIndex < MIN_CONSECUTIVE_MONTHS_FOR_AVERAGE - 1) {
+    return null;
+  }
+
+  const windowMonths = months.slice(endIndex - MOVING_AVERAGE_MONTHS + 1, endIndex + 1);
+  const windowValues = windowMonths.map((month) => countByMonth.get(month));
+
+  if (
+    windowMonths.length !== MOVING_AVERAGE_MONTHS ||
+    windowValues.some((value) => value === undefined)
+  ) {
+    return null;
+  }
+
+  return (windowValues as number[]).reduce((total, value) => total + value, 0) / windowValues.length;
+}
+
+function percentChange(current: number | null, comparison: number | null) {
+  if (current === null || comparison === null || comparison === 0) {
+    return null;
+  }
+
+  return (current - comparison) / comparison;
+}
+
+function sameMonthPreviousYear(months: string[], currentMonth: string | undefined) {
+  if (!currentMonth) {
+    return undefined;
+  }
+
+  const [year, month] = currentMonth.split("-").map(Number);
+  const targetMonth = `${year - 1}-${String(month).padStart(2, "0")}`;
+  return months.includes(targetMonth) ? targetMonth : undefined;
+}
+
+function equivalentPreCovidMonth(months: string[], currentMonth: string | undefined) {
+  if (!currentMonth) {
+    return undefined;
+  }
+
+  const monthNumber = currentMonth.slice(5);
+  return months
+    .filter((month) => month < PRE_COVID_CUTOFF_MONTH && month.endsWith(`-${monthNumber}`))
+    .at(-1);
+}
+
 function chartX(index: number, total: number) {
   const drawableWidth = CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
   if (total <= 1) {
@@ -782,6 +860,8 @@ function App() {
   const [selectedTrendLocationId, setSelectedTrendLocationId] = useState("");
   const [selectedTrendDayOfWeek, setSelectedTrendDayOfWeek] = useState("");
   const [selectedTrendHour, setSelectedTrendHour] = useState(12);
+  const [selectedTableDayOfWeek, setSelectedTableDayOfWeek] = useState("");
+  const [selectedTableHour, setSelectedTableHour] = useState(12);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -826,8 +906,10 @@ function App() {
         setSelectedMapDayOfWeek(daysOfWeek[0] ?? "");
         setSelectedTrendLocationId(loadedLocations[0]?.location_id ?? "");
         setSelectedTrendDayOfWeek(daysOfWeek[0] ?? "");
+        setSelectedTableDayOfWeek(daysOfWeek[0] ?? "");
         setSelectedHour(loadedHours.includes(12) ? 12 : (loadedHours[0] ?? 0));
         setSelectedTrendHour(loadedHours.includes(12) ? 12 : (loadedHours[0] ?? 0));
+        setSelectedTableHour(loadedHours.includes(12) ? 12 : (loadedHours[0] ?? 0));
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : "Unable to load map data.");
@@ -867,6 +949,9 @@ function App() {
   );
 
   const selectedTrendLocation = locationById.get(selectedTrendLocationId);
+  const latestMonth = months.at(-1);
+  const oneYearPriorMonth = sameMonthPreviousYear(months, latestMonth);
+  const preCovidComparisonMonth = equivalentPreCovidMonth(months, latestMonth);
 
   const trendPoints = useMemo<TrendPoint[]>(() => {
     const countByMonth = new Map(
@@ -926,6 +1011,66 @@ function App() {
       .filter((record): record is MarkerRecord => record !== null);
   }, [locationById, selectedHour, selectedMapDayOfWeek, selectedMonth, trafficRecords]);
 
+  const summaryTableRows = useMemo<SummaryTableRow[]>(() => {
+    const countsByLocation = new Map<string, Map<string, number>>();
+
+    trafficRecords
+      .filter(
+        (record) =>
+          record.day_of_week === selectedTableDayOfWeek && record.hour === selectedTableHour,
+      )
+      .forEach((record) => {
+        const countsByMonth = countsByLocation.get(record.location_id) ?? new Map<string, number>();
+        countsByMonth.set(record.month, record.avg_count);
+        countsByLocation.set(record.location_id, countsByMonth);
+      });
+
+    return locations
+      .map((location) => {
+        const countsByMonth = countsByLocation.get(location.location_id) ?? new Map<string, number>();
+        const currentAverage = rollingAverageForMonth(months, countsByMonth, latestMonth);
+        const oneYearPriorAverage = rollingAverageForMonth(months, countsByMonth, oneYearPriorMonth);
+        const preCovidAverage = rollingAverageForMonth(
+          months,
+          countsByMonth,
+          preCovidComparisonMonth,
+        );
+
+        return {
+          locationId: location.location_id,
+          locationName: location.display_name,
+          currentAverage,
+          oneYearChange: percentChange(currentAverage, oneYearPriorAverage),
+          preCovidChange: percentChange(currentAverage, preCovidAverage),
+        };
+      })
+      .sort((a, b) => {
+        if (a.currentAverage === null && b.currentAverage === null) {
+          return a.locationName.localeCompare(b.locationName);
+        }
+        if (a.currentAverage === null) {
+          return 1;
+        }
+        if (b.currentAverage === null) {
+          return -1;
+        }
+        return b.currentAverage - a.currentAverage;
+      });
+  }, [
+    latestMonth,
+    locations,
+    months,
+    oneYearPriorMonth,
+    preCovidComparisonMonth,
+    selectedTableDayOfWeek,
+    selectedTableHour,
+    trafficRecords,
+  ]);
+
+  const availableSummaryRowCount = summaryTableRows.filter(
+    (row) => row.currentAverage !== null,
+  ).length;
+
   const fallbackRoads = useMemo<BasemapRoad[]>(
     () =>
       STREETS.map((street) => ({
@@ -946,24 +1091,25 @@ function App() {
   return (
     <main className="app-shell">
       <section className="hero" aria-labelledby="page-title">
-        <p className="eyebrow">Auckland CBD pedestrian counts</p>
         <h1 id="page-title">Foot traffic counts across Auckland CBD.</h1>
         <p>
-          Explore average pedestrian activity by month, day of week, and hour. Each counter
-          shows a tooltip with the observed count for that moment.
+          Explore average pedestrian activity by month, day of week, and hour. Pedestrian counts
+          data sourced from{" "}
+          <a href="https://www.hotcity.co.nz/city-centre/results-and-statistics/pedestrian-counts">
+            Heart of the City
+          </a>
         </p>
       </section>
 
       <section className="map-panel" aria-labelledby="map-title">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Interactive map</p>
             <h2 id="map-title">Auckland CBD at {selectedLabel}</h2>
           </div>
           <p className="map-summary" aria-live="polite">
             {isLoading
               ? "Loading generated pedestrian data..."
-              : `${visibleRecords.length} counters visible`}
+              : `${visibleRecords.length} locations visible`}
           </p>
         </div>
 
@@ -1013,6 +1159,13 @@ function App() {
             </select>
           </label>
         </div>
+
+        <p className="map-rate-note">
+          Dots are paced from the selected average hourly count and play at{" "}
+          {FLOW_SIMULATED_SECONDS_PER_REAL_SECOND}x real time:{" "}
+          {FLOW_REAL_SECONDS_PER_TRAFFIC_MINUTE} seconds on the map represents 1 minute of foot
+          traffic.
+        </p>
 
         {error ? (
           <div className="map-error" role="alert">
@@ -1126,7 +1279,7 @@ function App() {
               </g>
             </svg>
 
-            <div className="flow-layer" aria-label="Observed pedestrian counters">
+            <div className="flow-layer" aria-label="Observed pedestrian locations">
               {visibleRecords.map((record) => {
                 const { x, y } = projectCoordinate([
                   record.location.longitude,
@@ -1186,9 +1339,8 @@ function App() {
       <section className="chart-panel" aria-labelledby="trend-title">
         <div className="panel-header chart-header">
           <div>
-            <p className="eyebrow">Raw count trend</p>
             <h2 id="trend-title">
-              {selectedTrendLocation?.display_name ?? "Select a counter"} over time
+              {selectedTrendLocation?.display_name ?? "Select a location"} over time
             </h2>
           </div>
           <p className="map-summary" aria-live="polite">
@@ -1263,6 +1415,92 @@ function App() {
           </div>
         )}
       </section>
+
+      <section className="summary-panel" aria-labelledby="summary-title">
+        <div className="panel-header">
+          <div>
+            <h2 id="summary-title">
+              Current 6-month averages at {formatHour(selectedTableHour)}
+            </h2>
+          </div>
+          <p className="map-summary" aria-live="polite">
+            {availableSummaryRowCount
+              ? `${availableSummaryRowCount} locations with current data`
+              : "No table data for this selection"}
+          </p>
+        </div>
+
+        <div className="controls table-controls" aria-label="Summary table filters">
+          <label>
+            <span>Day</span>
+            <select
+              value={selectedTableDayOfWeek}
+              onChange={(event) => setSelectedTableDayOfWeek(event.target.value)}
+              disabled={isLoading || daysOfWeek.length === 0}
+            >
+              {daysOfWeek.map((dayOfWeek) => (
+                <option key={dayOfWeek} value={dayOfWeek}>
+                  {dayOfWeek}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Hour</span>
+            <select
+              value={selectedTableHour}
+              onChange={(event) => setSelectedTableHour(Number(event.target.value))}
+              disabled={isLoading || hours.length === 0}
+            >
+              {hours.map((hour) => (
+                <option key={hour} value={hour}>
+                  {formatHour(hour)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="chart-copy">
+          <p>
+            Current values use the 6 months ending {latestMonth ? formatMonth(latestMonth) : "the latest month"}.
+            One-year and pre-COVID changes compare against the equivalent 6-month windows ending{" "}
+            {oneYearPriorMonth ? formatMonth(oneYearPriorMonth) : "one year earlier"} and{" "}
+            {preCovidComparisonMonth ? formatMonth(preCovidComparisonMonth) : "before COVID"}.
+          </p>
+        </div>
+
+        <div className="table-frame">
+          <table className="summary-table">
+            <thead>
+              <tr>
+                <th scope="col">Location</th>
+                <th scope="col">Current 6-month rolling average</th>
+                <th scope="col">% Change since 1 year prior</th>
+                <th scope="col">% Change vs pre-COVID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summaryTableRows.map((row) => (
+                <tr key={row.locationId}>
+                  <th scope="row">{row.locationName}</th>
+                  <td>
+                    {row.currentAverage === null
+                      ? "Not enough data"
+                      : formatCount(row.currentAverage)}
+                  </td>
+                  <td>{formatPercentChange(row.oneYearChange)}</td>
+                  <td>{formatPercentChange(row.preCovidChange)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <footer className="site-footer">
+        Made by <a href="https://samstemper.com">Sam Stemper</a>
+      </footer>
     </main>
   );
 }

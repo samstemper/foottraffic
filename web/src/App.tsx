@@ -1096,7 +1096,7 @@ function App() {
           Explore average pedestrian activity by month, day of week, and hour. Pedestrian counts
           data sourced from{" "}
           <a href="https://www.hotcity.co.nz/city-centre/results-and-statistics/pedestrian-counts">
-            Heart of the City
+            Heart of the City.
           </a>
         </p>
       </section>

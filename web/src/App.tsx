@@ -1097,7 +1097,7 @@ function App() {
           data sourced from{" "}
           <a href="https://www.hotcity.co.nz/city-centre/results-and-statistics/pedestrian-counts">
             Heart of the City
-          </a>
+          </a>.
         </p>
       </section>
 

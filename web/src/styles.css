@@ -10,6 +10,12 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+@media (min-width: 960px) {
+  :root {
+    font-size: 67%;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

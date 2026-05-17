@@ -253,11 +253,6 @@ h2 {
 
 .flow-dot {
   fill: #111111;
-  opacity: 0;
-}
-
-.flow-dot-fallback {
-  opacity: 0.42;
 }
 
 .flow-anchor {

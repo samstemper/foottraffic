@@ -10,12 +10,6 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-@media (min-width: 960px) {
-  :root {
-    font-size: 67%;
-  }
-}
-
 * {
   box-sizing: border-box;
 }
@@ -43,6 +37,12 @@ textarea {
     linear-gradient(180deg, rgb(0 0 0 / 4%) 1px, transparent 1px),
     #f6f5f1;
   background-size: 28px 28px;
+}
+
+@media (min-width: 960px) {
+  .app-shell {
+    zoom: 67%;
+  }
 }
 
 .hero {
